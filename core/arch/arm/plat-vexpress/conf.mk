@@ -112,6 +112,6 @@ CFG_SHMEM_START ?= 0x42000000
 CFG_SHMEM_SIZE  ?= 0x00200000
 # When Secure Data Path is enable, last MByte of TZDRAM is SDP test memory.
 CFG_TEE_SDP_MEM_SIZE ?= 0x00400000
-$(call force,CFG_DT,n)
-#CFG_DTB_MAX_SIZE ?= 0x100000
+$(call force,CFG_DT,y)
+CFG_DTB_MAX_SIZE ?= 0x100000
 endif
