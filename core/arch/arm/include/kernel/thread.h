@@ -42,7 +42,7 @@ struct thread_core_local {
 	uint64_t x[4];
 #endif
 	vaddr_t tmp_stack_va_end;
-	int curr_thread;
+	short int curr_thread;
 	uint32_t flags;
 	vaddr_t abt_stack_va_end;
 #ifdef CFG_TEE_CORE_DEBUG
@@ -265,6 +265,8 @@ void thread_init_per_cpu(void);
 
 struct thread_core_local *thread_get_core_local(void);
 
+void thread_core_local_set_tmp_stack_flag(void);
+
 /*
  * Sets the stacks to be used by the different threads. Use THREAD_ID_0 for
  * first stack, THREAD_ID_0 + 1 for the next and so on.
@@ -280,6 +282,9 @@ bool thread_init_stack(uint32_t stack_id, vaddr_t sp);
  */
 void thread_init_threads(void);
 
+/* Set thread_core_local::curr_thread = -1 for all CPUs */
+void thread_clr_thread_core_local(void);
+
 /*
  * Initializes a thread to be used during boot
  */
@@ -294,12 +299,12 @@ void thread_clr_boot_thread(void);
 /*
  * Returns current thread id.
  */
-int thread_get_id(void);
+short int thread_get_id(void);
 
 /*
  * Returns current thread id, return -1 on failure.
  */
-int thread_get_id_may_fail(void);
+short int thread_get_id_may_fail(void);
 
 /* Returns Thread Specific Data (TSD) pointer. */
 struct thread_specific_data *thread_get_tsd(void);
@@ -320,7 +325,7 @@ void thread_set_foreign_intr(bool enable);
 void thread_restore_foreign_intr(void);
 
 /*
- * Defines the bits for the exception mask used the the
+ * Defines the bits for the exception mask used by the
  * thread_*_exceptions() functions below.
  * These definitions are compatible with both ARM32 and ARM64.
  */
@@ -553,6 +558,12 @@ vaddr_t thread_stack_start(void);
 
 /* Returns the stack size for the current thread */
 size_t thread_stack_size(void);
+
+/*
+ * Returns the start and end addresses of the current stack (thread, temporary
+ * or abort stack).
+ */
+void get_stack_limits(vaddr_t *start, vaddr_t *end);
 
 bool thread_is_in_normal_mode(void);
 

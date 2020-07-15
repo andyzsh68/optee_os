@@ -148,6 +148,9 @@ clear_nex_bss:
 	/* Setup SP_EL0 and SP_EL1, SP will be set to SP_EL0 */
 	set_sp
 
+	/* curr_thread needs to be -1 until threads are properly initialized */
+	bl	thread_clr_thread_core_local
+
 	/* Enable aborts now that we can receive exceptions */
 	msr	daifclr, #DAIFBIT_ABT
 
@@ -207,7 +210,7 @@ clear_nex_bss:
 	mov	x0, x19		/* pagable part address */
 	mov	x1, #-1
 	mov	x2, x20		/* DT address */
-	bl	generic_boot_init_primary
+	bl	boot_init_primary
 
 	/*
 	 * In case we've touched memory that secondary CPUs will use before
@@ -223,7 +226,7 @@ clear_nex_bss:
 	/*
 	 * Clear current thread id now to allow the thread to be reused on
 	 * next entry. Matches the thread_init_boot_thread in
-	 * generic_boot.c.
+	 * boot.c.
 	 */
 #ifndef CFG_VIRTUALIZATION
 	bl 	thread_clr_boot_thread
@@ -241,7 +244,7 @@ clear_nex_bss:
 	smc	#0
 	b	.	/* SMC should not return */
 END_FUNC _start
-KEEP_INIT _start
+DECLARE_KEEP_INIT _start
 
 	.balign	8
 LOCAL_DATA cached_mem_end , :
@@ -402,9 +405,9 @@ FUNC cpu_on_handler , :
 	mov	x0, x19
 	mov	x1, x20
 	mov	x30, x21
-	b	generic_boot_cpu_on_handler
+	b	boot_cpu_on_handler
 END_FUNC cpu_on_handler
-KEEP_PAGER cpu_on_handler
+DECLARE_KEEP_PAGER cpu_on_handler
 
 LOCAL_FUNC unhandled_cpu , :
 	wfi
@@ -423,7 +426,7 @@ END_FUNC unhandled_cpu
 	  .endif
 	.endm
 
-	.section .identity_map
+	.section .identity_map, "ax", %progbits
 	.align	11
 LOCAL_FUNC reset_vect_table , :, .identity_map
 	/* -----------------------------------------------------

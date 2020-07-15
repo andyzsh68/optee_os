@@ -19,12 +19,13 @@ cleanfiles += $(link-out-dir)/$(shlibuuid).ta
 
 shlink-ldflags  = $(LDFLAGS)
 shlink-ldflags += -shared -z max-page-size=4096
+shlink-ldflags += $(call ld-option,-z separate-loadable-segments)
 shlink-ldflags += --as-needed # Do not add dependency on unused shlib
 
 shlink-ldadd  = $(LDADD)
 shlink-ldadd += $(addprefix -L,$(libdirs))
 shlink-ldadd += --start-group $(addprefix -l,$(libnames)) --end-group
-ldargs-$(shlibname).so := $(shlink-ldflags) $(objs) $(shlink-ldadd)
+ldargs-$(shlibname).so := $(shlink-ldflags) $(objs) $(shlink-ldadd) $(libgcc$(sm))
 
 
 $(link-out-dir)/$(shlibname).so: $(objs) $(libdeps)

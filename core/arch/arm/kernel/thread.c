@@ -56,7 +56,11 @@
 #endif /*ARM32*/
 
 #ifdef ARM64
+#if defined(__clang__) && !defined(CFG_CC_OPTIMIZE_FOR_SIZE)
+#define STACK_TMP_SIZE		(4096 + STACK_TMP_OFFS)
+#else
 #define STACK_TMP_SIZE		(2048 + STACK_TMP_OFFS)
+#endif
 #define STACK_THREAD_SIZE	8192
 
 #if TRACE_LEVEL > 0
@@ -114,8 +118,8 @@ const uint32_t stack_tmp_stride __section(".identity_map.stack_tmp_stride") =
  * These stack setup info are required by secondary boot cores before they
  * each locally enable the pager (the mmu). Hence kept in pager sections.
  */
-KEEP_PAGER(stack_tmp_export);
-KEEP_PAGER(stack_tmp_stride);
+DECLARE_KEEP_PAGER(stack_tmp_export);
+DECLARE_KEEP_PAGER(stack_tmp_stride);
 
 thread_pm_handler_t thread_cpu_on_handler_ptr __nex_bss;
 thread_pm_handler_t thread_cpu_off_handler_ptr __nex_bss;
@@ -273,10 +277,8 @@ void thread_unmask_exceptions(uint32_t state)
 }
 
 
-struct thread_core_local *thread_get_core_local(void)
+static struct thread_core_local *get_core_local(unsigned int pos)
 {
-	uint32_t cpu_id = get_core_pos();
-
 	/*
 	 * Foreign interrupts must be disabled before playing with core_local
 	 * since we otherwise may be rescheduled to a different core in the
@@ -284,8 +286,20 @@ struct thread_core_local *thread_get_core_local(void)
 	 */
 	assert(thread_get_exceptions() & THREAD_EXCP_FOREIGN_INTR);
 
-	assert(cpu_id < CFG_TEE_CORE_NB_CORE);
-	return &thread_core_local[cpu_id];
+	assert(pos < CFG_TEE_CORE_NB_CORE);
+	return &thread_core_local[pos];
+}
+
+struct thread_core_local *thread_get_core_local(void)
+{
+	unsigned int pos = get_core_pos();
+
+	return get_core_local(pos);
+}
+
+void thread_core_local_set_tmp_stack_flag(void)
+{
+	thread_get_core_local()->flags |= THREAD_CLF_TMP;
 }
 
 static void thread_lazy_save_ns_vfp(void)
@@ -401,6 +415,7 @@ void thread_clr_boot_thread(void)
 	assert(threads[l->curr_thread].state == THREAD_STATE_ACTIVE);
 	threads[l->curr_thread].state = THREAD_STATE_FREE;
 	l->curr_thread = -1;
+	l->flags &= ~THREAD_CLF_TMP;
 }
 
 void thread_alloc_and_run(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
@@ -432,6 +447,8 @@ void thread_alloc_and_run(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
 	init_regs(threads + n, a0, a1, a2, a3);
 
 	thread_lazy_save_ns_vfp();
+
+	l->flags &= ~THREAD_CLF_TMP;
 	thread_resume(&threads[n].regs);
 	/*NOTREACHED*/
 	panic();
@@ -569,6 +586,7 @@ void thread_resume_from_rpc(uint32_t thread_id, uint32_t a0, uint32_t a1,
 	if (threads[n].have_user_map)
 		ftrace_resume();
 
+	l->flags &= ~THREAD_CLF_TMP;
 	thread_resume(&threads[n].regs);
 	/*NOTREACHED*/
 	panic();
@@ -577,6 +595,12 @@ void thread_resume_from_rpc(uint32_t thread_id, uint32_t a0, uint32_t a1,
 void *thread_get_tmp_sp(void)
 {
 	struct thread_core_local *l = thread_get_core_local();
+
+	/*
+	 * Called from assembly when switching to the temporary stack, so flags
+	 * need updating
+	 */
+	l->flags |= THREAD_CLF_TMP;
 
 	return (void *)l->tmp_stack_va_end;
 }
@@ -609,6 +633,34 @@ size_t thread_stack_size(void)
 	return STACK_THREAD_SIZE;
 }
 
+void get_stack_limits(vaddr_t *start, vaddr_t *end)
+{
+	uint32_t exceptions = thread_mask_exceptions(THREAD_EXCP_FOREIGN_INTR);
+	unsigned int pos = get_core_pos();
+	struct thread_core_local *l = get_core_local(pos);
+	struct thread_ctx *thr = NULL;
+	int ct = -1;
+
+	if (l->flags & THREAD_CLF_TMP) {
+		/* We're using the temporary stack for this core */
+		*start = (vaddr_t)stack_tmp[pos];
+		*end = *start + STACK_TMP_SIZE;
+	} else if (l->flags & THREAD_CLF_ABORT) {
+		/* We're using the abort stack for this core */
+		*start = (vaddr_t)stack_abt[pos];
+		*end = *start + STACK_ABT_SIZE;
+	} else if (!l->flags) {
+		/* We're using a thread stack */
+		ct = l->curr_thread;
+		assert(ct >= 0 && ct < CFG_NUM_THREADS);
+		thr = threads + ct;
+		*end = thr->stack_va_end;
+		*start = *end - STACK_THREAD_SIZE;
+	}
+
+	thread_unmask_exceptions(exceptions);
+}
+
 bool thread_is_from_abort_mode(void)
 {
 	struct thread_core_local *l = thread_get_core_local();
@@ -630,8 +682,11 @@ bool thread_is_in_normal_mode(void)
 	struct thread_core_local *l = thread_get_core_local();
 	bool ret;
 
-	/* If any bit in l->flags is set we're handling some exception. */
-	ret = !l->flags;
+	/*
+	 * If any bit in l->flags is set aside from THREAD_CLF_TMP we're
+	 * handling some exception.
+	 */
+	ret = (l->curr_thread != -1) && !(l->flags & ~THREAD_CLF_TMP);
 	thread_unmask_exceptions(exceptions);
 
 	return ret;
@@ -779,23 +834,25 @@ bool thread_init_stack(uint32_t thread_id, vaddr_t sp)
 	return true;
 }
 
-int thread_get_id_may_fail(void)
+short int thread_get_id_may_fail(void)
 {
 	/*
 	 * thread_get_core_local() requires foreign interrupts to be disabled
 	 */
 	uint32_t exceptions = thread_mask_exceptions(THREAD_EXCP_FOREIGN_INTR);
 	struct thread_core_local *l = thread_get_core_local();
-	int ct = l->curr_thread;
+	short int ct = l->curr_thread;
 
 	thread_unmask_exceptions(exceptions);
 	return ct;
 }
 
-int thread_get_id(void)
+short int thread_get_id(void)
 {
-	int ct = thread_get_id_may_fail();
+	short int ct = thread_get_id_may_fail();
 
+	/* Thread ID has to fit in a short int */
+	COMPILE_TIME_ASSERT(CFG_NUM_THREADS <= SHRT_MAX);
 	assert(ct >= 0 && ct < CFG_NUM_THREADS);
 	return ct;
 }
@@ -888,7 +945,7 @@ static void init_user_kcode(void)
 
 void thread_init_threads(void)
 {
-	size_t n;
+	size_t n = 0;
 
 	init_thread_stacks();
 	pgt_init();
@@ -899,9 +956,15 @@ void thread_init_threads(void)
 		TAILQ_INIT(&threads[n].tsd.sess_stack);
 		SLIST_INIT(&threads[n].tsd.pgt_cache);
 	}
+}
+
+void thread_clr_thread_core_local(void)
+{
+	size_t n = 0;
 
 	for (n = 0; n < CFG_TEE_CORE_NB_CORE; n++)
 		thread_core_local[n].curr_thread = -1;
+	thread_core_local[0].flags |= THREAD_CLF_TMP;
 }
 
 void thread_init_primary(const struct thread_handlers *handlers)

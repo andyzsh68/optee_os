@@ -17,19 +17,16 @@
 
 #include <assert.h>
 #include <drivers/stm32_etzpc.h>
-#include <kernel/dt.h>
-#include <kernel/generic_boot.h>
 #include <initcall.h>
 #include <io.h>
 #include <keep.h>
+#include <kernel/dt.h>
+#include <kernel/boot.h>
 #include <kernel/panic.h>
 #include <kernel/pm.h>
+#include <libfdt.h>
 #include <mm/core_memprot.h>
 #include <util.h>
-
-#ifdef CFG_DT
-#include <libfdt.h>
-#endif
 
 /* Devicetree compatibulity */
 #define ETZPC_COMPAT			"st,stm32-etzpc"
@@ -244,7 +241,7 @@ static TEE_Result etzpc_pm(enum pm_op op, unsigned int pm_hint __unused,
 
 	return TEE_SUCCESS;
 }
-KEEP_PAGER(etzpc_pm);
+DECLARE_KEEP_PAGER(etzpc_pm);
 
 static void init_pm(struct etzpc_instance *dev)
 {

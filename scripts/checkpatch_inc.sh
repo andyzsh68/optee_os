@@ -18,16 +18,7 @@ function _checkpatch() {
 				typedefs_opt="";
 		# Ignore NOT_UNIFIED_DIFF in case patch has no diff
 		# (e.g., all paths filtered out)
-		$CHECKPATCH --quiet --ignore FILE_PATH_CHANGES \
-				--ignore GERRIT_CHANGE_ID \
-				--ignore NOT_UNIFIED_DIFF \
-				--ignore CAMELCASE \
-				--ignore PREFER_KERNEL_TYPES \
-				--ignore CONCATENATED_STRING \
-				--no-tree \
-				--strict \
-				$typedefs_opt \
-				-
+		$CHECKPATCH $typedefs_opt -
 }
 
 function checkpatch() {

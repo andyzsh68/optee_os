@@ -73,7 +73,7 @@ UNWIND(	.fnstart)
 	bx	lr
 UNWIND(	.fnend)
 END_FUNC plat_cpu_reset_early
-KEEP_PAGER plat_cpu_reset_early
+DECLARE_KEEP_PAGER plat_cpu_reset_early
 .weak plat_cpu_reset_early
 
 	.section .identity_map, "ax"
@@ -141,8 +141,8 @@ END_FUNC reset_vect_table
 	 * - Disable data and instruction cache.
 	 * - MMU is expected off and exceptions trapped in ARM mode.
 	 * - Enable or disable alignment checks upon platform configuration.
-	 * - Optinally enable write-implies-execute-never.
-	 * - Optinally enable round robin strategy for cache replacement.
+	 * - Optionally enable write-implies-execute-never.
+	 * - Optionally enable round robin strategy for cache replacement.
 	 *
 	 * Clobbers r0.
 	 */
@@ -253,7 +253,7 @@ UNWIND(	.cantunwind)
 #endif
 UNWIND(	.fnend)
 END_FUNC _start
-KEEP_INIT _start
+DECLARE_KEEP_INIT _start
 
 	/*
 	 * Setup sp to point to the top of the tmp stack for the current CPU:
@@ -457,6 +457,9 @@ shadow_stack_access_ok:
 
 	set_sp
 
+	/* curr_thread needs to be -1 until threads are properly initialized */
+	bl	thread_clr_thread_core_local
+
 	/* complete ARM secure MP common configuration */
 	bl	plat_primary_init_early
 
@@ -525,7 +528,7 @@ shadow_stack_access_ok:
 	mov	r0, r4		/* pageable part address */
 	mov	r1, r5		/* ns-entry address */
 	mov	r2, r6		/* DT address */
-	bl	generic_boot_init_primary
+	bl	boot_init_primary
 
 	/*
 	 * In case we've touched memory that secondary CPUs will use before
@@ -553,7 +556,7 @@ shadow_stack_access_ok:
 	/*
 	 * Clear current thread id now to allow the thread to be reused on
 	 * next entry. Matches the thread_init_boot_thread() in
-	 * generic_boot.c.
+	 * boot.c.
 	 */
 	bl 	thread_clr_boot_thread
 
@@ -807,12 +810,12 @@ UNWIND(	.cantunwind)
 
 	mov	r0, r4
 	mov	r1, r5
-	bl	generic_boot_cpu_on_handler
+	bl	boot_cpu_on_handler
 
 	bx	r6
 UNWIND(	.fnend)
 END_FUNC cpu_on_handler
-KEEP_PAGER cpu_on_handler
+DECLARE_KEEP_PAGER cpu_on_handler
 
 #else /* defined(CFG_WITH_ARM_TRUSTED_FW) */
 
@@ -850,16 +853,16 @@ UNWIND(	.cantunwind)
 
 #if defined (CFG_BOOT_SECONDARY_REQUEST)
 	/*
-	 * generic_boot_core_hpen return value (r0) is address of
+	 * boot_core_hpen() return value (r0) is address of
 	 * ns entry context structure
 	 */
-	bl	generic_boot_core_hpen
+	bl	boot_core_hpen
 	ldm	r0, {r0, r6}
 #else
 	mov	r0, r5		/* ns-entry address */
 	mov	r6, #0
 #endif
-	bl	generic_boot_init_secondary
+	bl	boot_init_secondary
 
 	mov	r0, #TEESMC_OPTEED_RETURN_ENTRY_DONE
 	mov	r1, r6
@@ -870,5 +873,5 @@ UNWIND(	.cantunwind)
 	b	.	/* SMC should not return */
 UNWIND(	.fnend)
 END_FUNC reset_secondary
-KEEP_PAGER reset_secondary
+DECLARE_KEEP_PAGER reset_secondary
 #endif /* defined(CFG_WITH_ARM_TRUSTED_FW) */

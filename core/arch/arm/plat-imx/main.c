@@ -34,7 +34,7 @@
 #include <drivers/imx_uart.h>
 #include <imx.h>
 #include <io.h>
-#include <kernel/generic_boot.h>
+#include <kernel/boot.h>
 #include <kernel/interrupt.h>
 #include <kernel/misc.h>
 #include <kernel/panic.h>
@@ -47,9 +47,9 @@
 #include <tee/entry_fast.h>
 #include <tee/entry_std.h>
 
-static struct gic_data gic_data;
+static struct gic_data gic_data __nex_bss;
 
-static const struct thread_handlers handlers = {
+static const struct thread_handlers handlers __nex_data = {
 #if defined(CFG_WITH_ARM_TRUSTED_FW)
 	.cpu_on = cpu_on_handler,
 	.cpu_off = pm_do_nothing,
@@ -67,7 +67,7 @@ static const struct thread_handlers handlers = {
 #endif
 };
 
-static struct imx_uart_data console_data;
+static struct imx_uart_data console_data __nex_bss;
 
 #ifdef CONSOLE_UART_BASE
 register_phys_mem_pgdir(MEM_AREA_IO_NSEC, CONSOLE_UART_BASE,
@@ -118,7 +118,12 @@ register_phys_mem_pgdir(MEM_AREA_IO_SEC,
 			CORE_MMU_PGDIR_SIZE);
 #endif
 
-const struct thread_handlers *generic_boot_get_handlers(void)
+register_dynamic_shm(CFG_NSEC_DDR_0_BASE, CFG_NSEC_DDR_0_SIZE);
+#if defined(CFG_NSEC_DDR_1_BASE) && defined(CFG_NSEC_DDR_1_SIZE)
+register_dynamic_shm(CFG_NSEC_DDR_1_BASE, CFG_NSEC_DDR_1_SIZE);
+#endif
+
+const struct thread_handlers *boot_get_handlers(void)
 {
 	return &handlers;
 }
@@ -171,26 +176,3 @@ void main_secondary_init_gic(void)
 	gic_cpu_init(&gic_data);
 }
 #endif
-
-#if defined(CFG_BOOT_SYNC_CPU)
-static void psci_boot_allcpus(void)
-{
-	vaddr_t src_base = core_mmu_get_va(SRC_BASE, MEM_AREA_TEE_COHERENT);
-	uint32_t pa = virt_to_phys((void *)TEE_TEXT_VA_START);
-
-	/* set secondary entry address and release core */
-	io_write32(src_base + SRC_GPR1 + 8, pa);
-	io_write32(src_base + SRC_GPR1 + 16, pa);
-	io_write32(src_base + SRC_GPR1 + 24, pa);
-
-	io_write32(src_base + SRC_SCR, BM_SRC_SCR_CPU_ENABLE_ALL);
-}
-#endif
-
-void plat_primary_init_early(void)
-{
-	/* primary core */
-#if defined(CFG_BOOT_SYNC_CPU)
-	psci_boot_allcpus()
-#endif
-}

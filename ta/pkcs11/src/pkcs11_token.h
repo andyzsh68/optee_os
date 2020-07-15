@@ -11,6 +11,8 @@
 #include <utee_defines.h>
 
 #include "handle.h"
+#include "object.h"
+#include "pkcs11_attributes.h"
 
 /* Hard coded description */
 #define PKCS11_SLOT_DESCRIPTION		"OP-TEE PKCS11 TA"
@@ -22,7 +24,6 @@
 #define PKCS11_TOKEN_LABEL		"OP-TEE PKCS#11 TA token"
 #define PKCS11_TOKEN_MANUFACTURER	PKCS11_SLOT_MANUFACTURER
 #define PKCS11_TOKEN_MODEL		"OP-TEE TA"
-#define PKCS11_TOKEN_SERIAL_NUMBER	"0000000000000000"
 #define PKCS11_TOKEN_HW_VERSION		PKCS11_SLOT_HW_VERSION
 #define PKCS11_TOKEN_FW_VERSION		PKCS11_SLOT_FW_VERSION
 
@@ -69,19 +70,34 @@ struct token_persistent_main {
 };
 
 /*
+ * Persistent objects in the token
+ *
+ * @count - number of objects stored in the token
+ * @uuids - array of object references/UUIDs (@count items)
+ */
+struct token_persistent_objs {
+	uint32_t count;
+	TEE_UUID uuids[];
+};
+
+/*
  * Runtime state of the token, complies with pkcs11
  *
  * @state - Pkcs11 login is public, user, SO or custom
  * @session_count - Counter for opened Pkcs11 sessions
  * @rw_session_count - Count for opened Pkcs11 read/write sessions
+ * @object_list - List of the objects owned by the token
  * @db_main - Volatile copy of the persistent main database
+ * @db_objs - Volatile copy of the persistent object database
  */
 struct ck_token {
 	enum pkcs11_token_state state;
 	uint32_t session_count;
 	uint32_t rw_session_count;
+	struct object_list object_list;
 	/* Copy in RAM of the persistent database */
 	struct token_persistent_main *db_main;
+	struct token_persistent_objs *db_objs;
 };
 
 /*
@@ -91,6 +107,8 @@ struct ck_token {
  * @client - Client the session belongs to
  * @token - Token this session belongs to
  * @handle - Identifier of the session published to the client
+ * @object_list - Entry of the session objects list
+ * @object_handle_db - Database for object handles published by the session
  * @state - R/W SO, R/W user, RO user, R/W public, RO public.
  */
 struct pkcs11_session {
@@ -98,6 +116,8 @@ struct pkcs11_session {
 	struct pkcs11_client *client;
 	struct ck_token *token;
 	uint32_t handle;
+	struct object_list object_list;
+	struct handle_db object_handle_db;
 	enum pkcs11_session_state state;
 };
 
@@ -122,6 +142,17 @@ enum pkcs11_rc hash_pin(enum pkcs11_user_type user, const uint8_t *pin,
 enum pkcs11_rc verify_pin(enum pkcs11_user_type user, const uint8_t *pin,
 			  size_t pin_size, uint32_t salt,
 			  const uint8_t hash[TEE_MAX_HASH_SIZE]);
+
+/* Token persistent objects */
+enum pkcs11_rc create_object_uuid(struct ck_token *token,
+				  struct pkcs11_object *obj);
+void destroy_object_uuid(struct ck_token *token, struct pkcs11_object *obj);
+enum pkcs11_rc unregister_persistent_object(struct ck_token *token,
+					    TEE_UUID *uuid);
+enum pkcs11_rc register_persistent_object(struct ck_token *token,
+					  TEE_UUID *uuid);
+enum pkcs11_rc get_persistent_objects_list(struct ck_token *token,
+					   TEE_UUID *array, size_t *size);
 
 /*
  * Pkcs11 session support
@@ -158,33 +189,39 @@ static inline bool pkcs11_session_is_so(struct pkcs11_session *session)
 }
 
 static inline
+struct object_list *pkcs11_get_session_objects(struct pkcs11_session *session)
+{
+	return &session->object_list;
+}
+
+static inline
 struct ck_token *pkcs11_session2token(struct pkcs11_session *session)
 {
 	return session->token;
 }
 
 /* Entry point for the TA commands */
-uint32_t entry_ck_slot_list(uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_slot_info(uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_token_info(uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_token_mecha_ids(uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_token_mecha_info(uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_open_session(struct pkcs11_client *client,
-			       uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_close_session(struct pkcs11_client *client,
-				uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_close_all_sessions(struct pkcs11_client *client,
+enum pkcs11_rc entry_ck_slot_list(uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_slot_info(uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_token_info(uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_token_mecha_ids(uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_token_mecha_info(uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_open_session(struct pkcs11_client *client,
 				     uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_session_info(struct pkcs11_client *client,
+enum pkcs11_rc entry_ck_close_session(struct pkcs11_client *client,
+				      uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_close_all_sessions(struct pkcs11_client *client,
+					   uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_session_info(struct pkcs11_client *client,
+				     uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_token_initialize(uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_init_pin(struct pkcs11_client *client,
+				 uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_set_pin(struct pkcs11_client *client,
+				uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_login(struct pkcs11_client *client,
+			      uint32_t ptypes, TEE_Param *params);
+enum pkcs11_rc entry_ck_logout(struct pkcs11_client *client,
 			       uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_token_initialize(uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_init_pin(struct pkcs11_client *client,
-			   uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_set_pin(struct pkcs11_client *client,
-			  uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_login(struct pkcs11_client *client,
-			uint32_t ptypes, TEE_Param *params);
-uint32_t entry_ck_logout(struct pkcs11_client *client,
-			 uint32_t ptypes, TEE_Param *params);
 
 #endif /*PKCS11_TA_PKCS11_TOKEN_H*/

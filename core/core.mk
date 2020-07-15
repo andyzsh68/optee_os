@@ -8,6 +8,7 @@ arch-dir	:= core/arch/$(ARCH)
 platform-dir	:= $(arch-dir)/plat-$(PLATFORM)
 include $(platform-dir)/conf.mk
 include mk/config.mk
+# $(ARCH).mk also sets the compiler for the core module
 include core/arch/$(ARCH)/$(ARCH).mk
 
 PLATFORM_$(PLATFORM) := y
@@ -15,10 +16,6 @@ PLATFORM_FLAVOR_$(PLATFORM_FLAVOR) := y
 
 $(eval $(call cfg-depends-all,CFG_PAGED_USER_TA,CFG_WITH_PAGER CFG_WITH_USER_TA))
 include core/crypto.mk
-
-# Setup compiler for this sub module
-COMPILER_$(sm)		?= $(COMPILER)
-include mk/$(COMPILER_$(sm)).mk
 
 cppflags$(sm)	+= -D__KERNEL__
 
@@ -128,11 +125,9 @@ include mk/lib.mk
 
 base-prefix :=
 
-ifeq ($(CFG_DT),y)
 libname = fdt
 libdir = core/lib/libfdt
 include mk/lib.mk
-endif
 
 ifeq ($(CFG_ZLIB),y)
 libname = zlib

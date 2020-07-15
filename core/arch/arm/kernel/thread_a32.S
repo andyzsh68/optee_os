@@ -225,7 +225,7 @@ UNWIND(	.fnstart)
 	bx	lr
 UNWIND(	.fnend)
 END_FUNC thread_init_vbar
-KEEP_PAGER thread_init_vbar
+DECLARE_KEEP_PAGER thread_init_vbar
 
 /*
  * Below are low level routines handling entry and return from user mode.
@@ -238,9 +238,9 @@ KEEP_PAGER thread_init_vbar
  * returning by restoring the registers saved by thread_enter_user_mode().
  *
  * There's three ways for thread_enter_user_mode() to return to caller,
- * user TA calls utee_return, user TA calls utee_panic or through an abort.
+ * user TA calls _utee_return, user TA calls _utee_panic or through an abort.
  *
- * Calls to utee_return or utee_panic are handled as:
+ * Calls to _utee_return or _utee_panic are handled as:
  * __thread_svc_handler() -> thread_svc_handler() ->tee_svc_do_call() which
  * calls syscall_return() or syscall_panic().
  *

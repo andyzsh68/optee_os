@@ -6,6 +6,7 @@
 
 #include <arm.h>
 #include <assert.h>
+#include <initcall.h>
 #include <kernel/panic.h>
 #include <kernel/spinlock.h>
 #include <kernel/tee_common.h>
@@ -370,8 +371,10 @@ static TEE_Result split_vm_region(struct user_mode_ctx *uctx,
 	if (mobj_is_paged(r->mobj)) {
 		TEE_Result res = tee_pager_split_um_region(uctx, va);
 
-		if (res)
+		if (res) {
+			free(r2);
 			return res;
+		}
 	}
 
 	r2->mobj = mobj_get(r->mobj);
@@ -715,6 +718,7 @@ TEE_Result vm_unmap(struct user_mode_ctx *uctx, vaddr_t va, size_t len)
 	struct vm_region *r = NULL;
 	struct vm_region *r_next = NULL;
 	size_t end_va = 0;
+	size_t unmap_end_va = 0;
 	size_t l = 0;
 
 	assert(thread_get_tsd()->ctx == &uctx->ctx);
@@ -734,11 +738,12 @@ TEE_Result vm_unmap(struct user_mode_ctx *uctx, vaddr_t va, size_t len)
 
 	while (true) {
 		r_next = TAILQ_NEXT(r, link);
+		unmap_end_va = r->va + r->size;
 		if (mobj_is_paged(r->mobj))
 			tee_pager_rem_um_region(uctx, r->va, r->size);
 		maybe_free_pgt(uctx, r);
 		umap_remove_region(&uctx->vm_info, r);
-		if (!r_next || r->va + r->size == end_va)
+		if (!r_next || unmap_end_va == end_va)
 			break;
 		r = r_next;
 	}
@@ -1048,7 +1053,7 @@ bool tee_mmu_is_vbuf_inside_um_private(const struct user_mode_ctx *uctx,
 	TAILQ_FOREACH(r, &uctx->vm_info.regions, link) {
 		if (r->flags & VM_FLAGS_NONPRIV)
 			continue;
-		if (core_is_buffer_inside(va, size, r->va, r->size))
+		if (core_is_buffer_inside((vaddr_t)va, size, r->va, r->size))
 			return true;
 	}
 
@@ -1064,7 +1069,7 @@ bool tee_mmu_is_vbuf_intersect_um_private(const struct user_mode_ctx *uctx,
 	TAILQ_FOREACH(r, &uctx->vm_info.regions, link) {
 		if (r->attr & VM_FLAGS_NONPRIV)
 			continue;
-		if (core_is_buffer_intersect(va, size, r->va, r->size))
+		if (core_is_buffer_intersect((vaddr_t)va, size, r->va, r->size))
 			return true;
 	}
 
@@ -1080,7 +1085,7 @@ TEE_Result tee_mmu_vbuf_to_mobj_offs(const struct user_mode_ctx *uctx,
 	TAILQ_FOREACH(r, &uctx->vm_info.regions, link) {
 		if (!r->mobj)
 			continue;
-		if (core_is_buffer_inside(va, size, r->va, r->size)) {
+		if (core_is_buffer_inside((vaddr_t)va, size, r->va, r->size)) {
 			size_t poffs;
 
 			poffs = mobj_get_phys_offs(r->mobj,
@@ -1100,7 +1105,8 @@ static TEE_Result tee_mmu_user_va2pa_attr(const struct user_mode_ctx *uctx,
 	struct vm_region *region = NULL;
 
 	TAILQ_FOREACH(region, &uctx->vm_info.regions, link) {
-		if (!core_is_buffer_inside(ua, 1, region->va, region->size))
+		if (!core_is_buffer_inside((vaddr_t)ua, 1, region->va,
+					   region->size))
 			continue;
 
 		if (pa) {
@@ -1310,7 +1316,7 @@ void teecore_init_ta_ram(void)
 }
 
 #ifdef CFG_CORE_RESERVED_SHM
-void teecore_init_pub_ram(void)
+static TEE_Result teecore_init_pub_ram(void)
 {
 	vaddr_t s;
 	vaddr_t e;
@@ -1334,7 +1340,10 @@ void teecore_init_pub_ram(void)
 
 	default_nsec_shm_paddr = virt_to_phys((void *)s);
 	default_nsec_shm_size = e - s;
+
+	return TEE_SUCCESS;
 }
+early_init(teecore_init_pub_ram);
 #endif /*CFG_CORE_RESERVED_SHM*/
 
 uint32_t tee_mmu_user_get_cache_attr(struct user_mode_ctx *uctx, void *va)

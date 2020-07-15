@@ -37,7 +37,6 @@ endif
 
 $(call force,CFG_WITH_ARM_TRUSTED_FW,y)
 $(call force,CFG_ARM64_core,y)
-$(call force,CFG_GENERIC_BOOT,y)
 $(call force,CFG_GIC,y)
 $(call force,CFG_PM_STUBS,y)
 $(call force,CFG_SECURE_TIME_SOURCE_CNTPCT,y)
@@ -49,5 +48,4 @@ else
 $(call force,CFG_ARM32_core,y)
 endif
 
-CFG_WITH_STACK_CANARIES ?= y
 CFG_WITH_STATS ?= y

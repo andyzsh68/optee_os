@@ -9,15 +9,18 @@
 #include <config.h>
 #include <console.h>
 #include <crypto/crypto.h>
+#include <initcall.h>
 #include <inttypes.h>
 #include <keep.h>
 #include <kernel/asan.h>
-#include <kernel/generic_boot.h>
+#include <kernel/boot.h>
 #include <kernel/linker.h>
 #include <kernel/misc.h>
 #include <kernel/panic.h>
 #include <kernel/tee_misc.h>
 #include <kernel/thread.h>
+#include <kernel/tpm.h>
+#include <libfdt.h>
 #include <malloc.h>
 #include <mm/core_memprot.h>
 #include <mm/core_mmu.h>
@@ -26,12 +29,10 @@
 #include <mm/tee_mmu.h>
 #include <mm/tee_pager.h>
 #include <sm/psci.h>
-#include <sm/tee_mon.h>
 #include <stdio.h>
 #include <trace.h>
 #include <utee_defines.h>
 #include <util.h>
-#include <kernel/tpm.h>
 
 #include <platform_config.h>
 
@@ -41,10 +42,6 @@
 
 #if defined(CFG_WITH_VFP)
 #include <kernel/vfp.h>
-#endif
-
-#if defined(CFG_DT)
-#include <libfdt.h>
 #endif
 
 /*
@@ -73,7 +70,7 @@ static uint32_t spin_table[CFG_TEE_CORE_NB_CORE];
  * When 1, it has started
  */
 uint32_t sem_cpu_sync[CFG_TEE_CORE_NB_CORE];
-KEEP_PAGER(sem_cpu_sync);
+DECLARE_KEEP_PAGER(sem_cpu_sync);
 #endif
 
 #ifdef CFG_DT
@@ -93,7 +90,7 @@ static uint32_t cntfrq;
 __weak void plat_primary_init_early(void)
 {
 }
-KEEP_PAGER(plat_primary_init_early);
+DECLARE_KEEP_PAGER(plat_primary_init_early);
 
 /* May be overridden in plat-$(PLATFORM)/main.c */
 __weak void main_init_gic(void)
@@ -597,12 +594,12 @@ void *get_external_dt(void)
 	return external_dt.blob;
 }
 
-static void release_external_dt(void)
+static TEE_Result release_external_dt(void)
 {
 	int ret = 0;
 
 	if (!external_dt.blob)
-		return;
+		return TEE_SUCCESS;
 
 	ret = fdt_pack(external_dt.blob);
 	if (ret < 0) {
@@ -613,7 +610,10 @@ static void release_external_dt(void)
 
 	/* External DTB no more reached, reset pointer to invalid */
 	external_dt.blob = NULL;
+
+	return TEE_SUCCESS;
 }
+boot_final(release_external_dt);
 
 #ifdef CFG_EXTERNAL_DTB_OVERLAY
 static int add_dt_overlay_fragment(struct dt_descriptor *dt, int ioffs)
@@ -1017,15 +1017,14 @@ static void init_external_dt(unsigned long phys_dt)
 
 	ret = init_dt_overlay(dt, CFG_DTB_MAX_SIZE);
 	if (ret < 0) {
-		EMSG("Device Tree Overlay init fail @ 0x%" PRIxPA ": error %d",
-		     phys_dt, ret);
+		EMSG("Device Tree Overlay init fail @ %#lx: error %d", phys_dt,
+		     ret);
 		panic();
 	}
 
 	ret = fdt_open_into(fdt, fdt, CFG_DTB_MAX_SIZE);
 	if (ret < 0) {
-		EMSG("Invalid Device Tree at 0x%" PRIxPA ": error %d",
-		     phys_dt, ret);
+		EMSG("Invalid Device Tree at %#lx: error %d", phys_dt, ret);
 		panic();
 	}
 
@@ -1063,10 +1062,6 @@ static void update_external_dt(void)
 void *get_external_dt(void)
 {
 	return NULL;
-}
-
-static void release_external_dt(void)
-{
 }
 
 static void init_external_dt(unsigned long phys_dt __unused)
@@ -1134,12 +1129,10 @@ void init_tee_runtime(void)
 	/* Pager initializes TA RAM early */
 	teecore_init_ta_ram();
 #endif
-	if (init_teecore() != TEE_SUCCESS)
-		panic();
+	call_initcalls();
 }
 
-static void init_primary_helper(unsigned long pageable_part,
-				unsigned long nsec_entry, unsigned long fdt)
+static void init_primary(unsigned long pageable_part, unsigned long nsec_entry)
 {
 	/*
 	 * Mask asynchronous exceptions before switch to the thread vector
@@ -1151,14 +1144,29 @@ static void init_primary_helper(unsigned long pageable_part,
 	thread_set_exceptions(THREAD_EXCP_ALL);
 	primary_save_cntfrq();
 	init_vfp_sec();
+	/*
+	 * Pager: init_runtime() calls thread_kernel_enable_vfp() so we must
+	 * set a current thread right now to avoid a chicken-and-egg problem
+	 * (thread_init_boot_thread() sets the current thread but needs
+	 * things set by init_runtime()).
+	 */
+	thread_get_core_local()->curr_thread = 0;
 	init_runtime(pageable_part);
 
 #ifndef CFG_VIRTUALIZATION
 	thread_init_boot_thread();
 #endif
-	thread_init_primary(generic_boot_get_handlers());
+	thread_init_primary(boot_get_handlers());
 	thread_init_per_cpu();
 	init_sec_mon(nsec_entry);
+}
+
+/*
+ * Note: this function is weak just to make it possible to exclude it from
+ * the unpaged area.
+ */
+void __weak paged_init_primary(unsigned long fdt)
+{
 	init_external_dt(fdt);
 	tpm_map_log_area(get_external_dt());
 	discover_nsec_memory();
@@ -1166,6 +1174,7 @@ static void init_primary_helper(unsigned long pageable_part,
 	configure_console_from_dt();
 
 	IMSG("OP-TEE version: %s", core_v_str);
+	IMSG("Primary CPU initializing");
 #ifdef CFG_CORE_ASLR
 	DMSG("Executing at offset %#lx with virtual load address %#"PRIxVA,
 	     (unsigned long)boot_mmu_config.load_offset, VCORE_START_VA);
@@ -1176,19 +1185,22 @@ static void init_primary_helper(unsigned long pageable_part,
 #ifndef CFG_VIRTUALIZATION
 	init_tee_runtime();
 #endif
-	release_external_dt();
 #ifdef CFG_VIRTUALIZATION
 	IMSG("Initializing virtualization support");
 	core_mmu_init_virtualization();
 #endif
-	DMSG("Primary CPU switching to normal world boot");
+	call_finalcalls();
+	IMSG("Primary CPU switching to normal world boot");
 }
 
 /* What this function is using is needed each time another CPU is started */
-KEEP_PAGER(generic_boot_get_handlers);
+DECLARE_KEEP_PAGER(boot_get_handlers);
 
 static void init_secondary_helper(unsigned long nsec_entry)
 {
+	thread_core_local_set_tmp_stack_flag();
+	IMSG("Secondary CPU %zu initalizing", get_core_pos());
+
 	/*
 	 * Mask asynchronous exceptions before switch to the thread vector
 	 * as the thread handler requires those to be masked while
@@ -1205,50 +1217,51 @@ static void init_secondary_helper(unsigned long nsec_entry)
 	init_vfp_sec();
 	init_vfp_nsec();
 
-	DMSG("Secondary CPU Switching to normal world boot");
+	IMSG("Secondary CPU %zu switching to normal world boot", get_core_pos());
 }
 
 /*
  * Note: this function is weak just to make it possible to exclude it from
- * the unpaged area.
+ * the unpaged area so that it lies in the init area.
  */
-void __weak generic_boot_init_primary(unsigned long pageable_part,
-				      unsigned long nsec_entry __maybe_unused,
-				      unsigned long fdt)
+void __weak boot_init_primary(unsigned long pageable_part,
+			      unsigned long nsec_entry __maybe_unused,
+			      unsigned long fdt)
 {
 	unsigned long e = PADDR_INVALID;
 
 #if !defined(CFG_WITH_ARM_TRUSTED_FW)
 	e = nsec_entry;
 #endif
-	init_primary_helper(pageable_part, e, fdt);
+
+	init_primary(pageable_part, e);
+	paged_init_primary(fdt);
 }
 
 #if defined(CFG_WITH_ARM_TRUSTED_FW)
-unsigned long generic_boot_cpu_on_handler(unsigned long a0 __maybe_unused,
-				     unsigned long a1 __unused)
+unsigned long boot_cpu_on_handler(unsigned long a0 __maybe_unused,
+				  unsigned long a1 __unused)
 {
-	DMSG("cpu %zu: a0 0x%lx", get_core_pos(), a0);
 	init_secondary_helper(PADDR_INVALID);
 	return 0;
 }
 #else
-void generic_boot_init_secondary(unsigned long nsec_entry)
+void boot_init_secondary(unsigned long nsec_entry)
 {
 	init_secondary_helper(nsec_entry);
 }
 #endif
 
 #if defined(CFG_BOOT_SECONDARY_REQUEST)
-void generic_boot_set_core_ns_entry(size_t core_idx, uintptr_t entry,
-				    uintptr_t context_id)
+void boot_set_core_ns_entry(size_t core_idx, uintptr_t entry,
+			    uintptr_t context_id)
 {
 	ns_entry_contexts[core_idx].entry_point = entry;
 	ns_entry_contexts[core_idx].context_id = context_id;
 	dsb_ishst();
 }
 
-int generic_boot_core_release(size_t core_idx, paddr_t entry)
+int boot_core_release(size_t core_idx, paddr_t entry)
 {
 	if (!core_idx || core_idx >= CFG_TEE_CORE_NB_CORE)
 		return -1;
@@ -1266,7 +1279,7 @@ int generic_boot_core_release(size_t core_idx, paddr_t entry)
  * spin until secondary boot request, then returns with
  * the secondary core entry address.
  */
-struct ns_entry_context *generic_boot_core_hpen(void)
+struct ns_entry_context *boot_core_hpen(void)
 {
 #ifdef CFG_PSCI_ARM32
 	return &ns_entry_contexts[get_core_pos()];

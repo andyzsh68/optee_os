@@ -1,6 +1,5 @@
 PLATFORM_FLAVOR ?= developerbox
 
-$(call force,CFG_GENERIC_BOOT,y)
 $(call force,CFG_SECURE_TIME_SOURCE_CNTPCT,y)
 $(call force,CFG_GIC,y)
 $(call force,CFG_PL011,y)
@@ -21,6 +20,5 @@ $(call force,CFG_ARM64_core,y)
 supported-ta-targets = ta_arm64
 
 CFG_CRYPTO_SIZE_OPTIMIZATION ?= n
-CFG_WITH_STACK_CANARIES ?= y
 $(call force,CFG_ARM_GICV3,y)
 $(call force,CFG_CORE_CLUSTER_SHIFT,1)
