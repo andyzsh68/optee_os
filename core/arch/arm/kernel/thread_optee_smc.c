@@ -165,6 +165,7 @@ static uint32_t std_smc_entry(uint32_t a0, uint32_t a1, uint32_t a2,
 	struct mobj *mobj = NULL;
 	uint32_t rv = 0;
 
+	DMSG("a0: 0x%x, a1: 0x%x, a2: 0x%x, a3: 0x%x", a0, a1, a2, a3);
 	if (a0 != OPTEE_SMC_CALL_WITH_ARG) {
 		EMSG("Unknown SMC 0x%"PRIx32, a0);
 		DMSG("Expected 0x%x", OPTEE_SMC_CALL_WITH_ARG);
@@ -180,6 +181,7 @@ static uint32_t std_smc_entry(uint32_t a0, uint32_t a1, uint32_t a2,
 		if (parg & SMALL_PAGE_MASK)
 			return OPTEE_SMC_RETURN_EBADADDR;
 		mobj = map_cmd_buffer(parg, &num_params);
+		EMSG("mobj %p", (void *)mobj);
 	}
 
 	if (!mobj || !ALIGNMENT_IS_OK(parg, struct optee_msg_arg)) {
