@@ -1094,7 +1094,7 @@ static void collect_mem_ranges(struct memory_map *mem_map)
 			     VCORE_UNPG_RO_SZ);
 
 		if (IS_ENABLED(CFG_NS_VIRTUALIZATION)) {
-			ADD_PHYS_MEM(MEM_AREA_NEX_RAM_RO, VCORE_UNPG_RW_PA,
+			ADD_PHYS_MEM(MEM_AREA_NEX_RAM_RW, VCORE_UNPG_RW_PA,
 				     VCORE_UNPG_RW_SZ);
 			ADD_PHYS_MEM(MEM_AREA_NEX_RAM_RW, VCORE_NEX_RW_PA,
 				     VCORE_NEX_RW_SZ);
