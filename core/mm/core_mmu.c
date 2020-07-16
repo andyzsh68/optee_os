@@ -422,7 +422,7 @@ static void carve_out_phys_mem(struct core_mmu_phys_mem **mem, size_t *nelems,
 		/* Remove this entry */
 		(*nelems)--;
 		memmove(m + n, m + n + 1, sizeof(*m) * (*nelems - n));
-		m = nex_realloc(m, sizeof(*m) * *nelems);
+		m = nex_realloc(m, sizeof(*m) * *nelems);	/* already fixed */
 		if (!m)
 			panic();
 		*mem = m;
@@ -433,7 +433,7 @@ static void carve_out_phys_mem(struct core_mmu_phys_mem **mem, size_t *nelems,
 		m[n].size -= size;
 	} else {
 		/* Need to split the memory entry */
-		m = nex_realloc(m, sizeof(*m) * (*nelems + 1));
+		m = nex_realloc(m, sizeof(*m) * (*nelems + 1));	/* already fixed */
 		if (!m)
 			panic();
 		*mem = m;
