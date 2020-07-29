@@ -221,7 +221,7 @@ static int configure_guest_prtn_mem(struct guest_partition *prtn)
 	core_mmu_set_prtn(prtn->mmu_prtn);
 
 	/* clear .bss */
-	memset((void *)(VCORE_UNPG_RW_PA), 0, VCORE_UNPG_RW_SZ);
+	memset((void *)(__bss_start), 0, (__bss_end - __bss_start));
 
 	/* copy .data section from R/O original */
 	memcpy(__data_start,

@@ -50,11 +50,15 @@ static TEE_Result get_devices(uint32_t types,
 	if (types != TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_OUTPUT,
 				     TEE_PARAM_TYPE_NONE,
 				     TEE_PARAM_TYPE_NONE,
-				     TEE_PARAM_TYPE_NONE))
+				     TEE_PARAM_TYPE_NONE)) {
+		EMSG(PTA_NAME ": type: %d", types);
 		return TEE_ERROR_BAD_PARAMETERS;
+	}
 
-	if (!params[0].memref.buffer && (params[0].memref.size > 0))
+	if (!params[0].memref.buffer && (params[0].memref.size > 0)) {
+		EMSG(PTA_NAME ": buffer: %p, size: %d", params[0].memref.buffer, params[0].memref.size);
 		return TEE_ERROR_BAD_PARAMETERS;
+	}
 
 	buf =  params[0].memref.buffer;
 	blen = params[0].memref.size;
@@ -68,8 +72,10 @@ static TEE_Result get_devices(uint32_t types,
 			       rflags);
 
 	params[0].memref.size = pos;
-	if (pos > blen)
+	if (pos > blen) {
+		EMSG(PTA_NAME ":pos %d > blen %d", pos, blen);
 		return TEE_ERROR_SHORT_BUFFER;
+	}
 
 	return TEE_SUCCESS;
 }
@@ -78,6 +84,7 @@ static TEE_Result invoke_command(void *pSessionContext __unused,
 				 uint32_t nCommandID, uint32_t nParamTypes,
 				 TEE_Param pParams[TEE_NUM_PARAMS])
 {
+	DMSG(PTA_NAME ": cmd %d", nCommandID);
 	switch (nCommandID) {
 	case PTA_CMD_GET_DEVICES:
 		return get_devices(nParamTypes, pParams,
